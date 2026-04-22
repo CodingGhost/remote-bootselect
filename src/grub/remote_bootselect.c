@@ -85,7 +85,22 @@ static grub_err_t append_etherhdr(struct grub_net_buff *nb, struct grub_net_card
     grub_uint16_t ethertype = grub_cpu_to_be16(BOOTSELECT_ETHERTYPE);
     struct etherhdr hdr;
     grub_memcpy(hdr.dst, ether_broadcast_addr, 6);
-    grub_memcpy(hdr.src, &card->default_address.mac, 6);
+    grub_memcpy(hdr.src, card->default_address.mac+1, 6);
+    //grub_memcpy(hdr.src, test_addr, 6);
+    grub_printf("card mac: %02x:%02x:%02x:%02x:%02x:%02x\n",
+                card->default_address.mac[0],
+                card->default_address.mac[1],
+                card->default_address.mac[2],
+                card->default_address.mac[3],
+                card->default_address.mac[4],
+                card->default_address.mac[5]);
+
+    char buf[GRUB_NET_MAX_STR_HWADDR_LEN];
+
+    /* grub_net_hwaddr_to_str formats the MAC as "XX:XX:XX:XX:XX:XX" */
+    grub_net_hwaddr_to_str (&card->default_address, buf);
+
+    grub_printf ("%-12s  MAC: %s\n", card->name, buf);
     hdr.type = ethertype;
     return netbuff_append(nb, &hdr, sizeof(hdr));
 }
@@ -118,21 +133,34 @@ static grub_err_t grub_cmd_remote_bootselect(grub_extcmd_context_t cmd __attribu
 
     flush_recv(card);
 
-    const grub_uint64_t timeout_ms = 1000;
+    const grub_uint64_t timeout_ms = 5000;
     grub_uint64_t limit_time = grub_get_time_ms() + timeout_ms;
     while (grub_get_time_ms() < limit_time) {
         card->driver->send(card, nb);
         grub_millisleep(10);
         struct grub_net_buff *response = card->driver->recv(card);
         if (response) {
-            struct etherhdr response_hdr;
-            void *data = netbuff_get(response, sizeof(response_hdr));
+            grub_printf("got response");
+
+            void *data = netbuff_get(response, sizeof(struct etherhdr));
             if (data == NULL) {
                 grub_netbuff_free(response);
+                grub_printf("data is null");
                 continue;
             }
-            response_hdr = *(struct etherhdr *)data;
-            if (response_hdr.type == ethertype && (grub_memcmp(response_hdr.dst, &card->default_address.mac, 6) == 0)) {
+            struct etherhdr response_hdr = *(struct etherhdr *)data;
+            if (response_hdr.type == ethertype)
+            {
+                grub_printf("correct ethertype matched!");
+            }
+            else
+            {
+                grub_uint16_t rx_type = grub_be_to_cpu16(response_hdr.type);
+                grub_printf("rx ethertype=0x%04x expected=0x%04x\n",rx_type, BOOTSELECT_ETHERTYPE);
+
+                grub_printf("wrong ethertype");
+            }
+            if (response_hdr.type == ethertype && (grub_memcmp(response_hdr.dst, card->default_address.mac+1, 6) == 0)) {
                 grub_uint8_t len;
                 data = netbuff_get(response, sizeof(len));
                 if (data == NULL) {
@@ -151,11 +179,18 @@ static grub_err_t grub_cmd_remote_bootselect(grub_extcmd_context_t cmd __attribu
                 grub_memcpy(entry, data, len);
                 entry[len] = '\0';
                 grub_printf("got default:%s\n", entry);
-                grub_env_set("default", entry);
+                if(grub_strcmp(entry,"default"))//if default is selected, dont modify boot behaviour
+                {
+                    grub_env_set("default", entry);
+                }
                 grub_free(entry);
                 grub_netbuff_free(response);
                 grub_netbuff_free(nb);
                 return GRUB_ERR_NONE;
+            }
+            else
+            {
+                grub_printf("mac compare failed!");
             }
             grub_netbuff_free(response);
         }
@@ -216,7 +251,8 @@ static grub_err_t grub_cmd_remote_bootselect_export(grub_extcmd_context_t cmd __
         grub_uint32_t title_len = grub_strlen(entry->title) + 1;
         netbuff_append(nb, entry->title, title_len);
     }
-
+    netbuff_append(nb,"default",8);//add default option to selectable list
+    netbuff_append(nb,"default",8);
     card->driver->send(card, nb);
     grub_netbuff_free(nb);
     return 0;
@@ -227,9 +263,9 @@ static grub_extcmd_t remote_bootselect_export;
 
 GRUB_MOD_INIT(remote_bootselect) {
     remote_bootselect_cmd =
-        grub_register_extcmd("remote_bootselect", grub_cmd_remote_bootselect, 0, 0, N_("Get the default boot option from the network."), 0);
+    grub_register_extcmd("remote_bootselect", grub_cmd_remote_bootselect, 0, 0, N_("Get the default boot option from the network."), 0);
     remote_bootselect_export =
-        grub_register_extcmd("remote_bootselect_export", grub_cmd_remote_bootselect_export, 0, 0, N_("Send menu entries to network."), 0);
+    grub_register_extcmd("remote_bootselect_export", grub_cmd_remote_bootselect_export, 0, 0, N_("Send menu entries to network."), 0);
 }
 
 GRUB_MOD_FINI(remote_bootselect) {
