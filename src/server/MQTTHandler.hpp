@@ -18,6 +18,7 @@ class MQTTHandler {
     void get_state(std::string const& host, int const& port, std::string const& username, std::string const& password);
 
   private:
+    EventHandler& eventHandler;
     const std::string mqtt_topic = "remote_bootselect";
     const std::string discovery_topic = "homeassistant/device/remote_bootselect/config";
     mosquitto* mqtt;
@@ -27,4 +28,5 @@ class MQTTHandler {
     std::function<void(uint32_t events)> handler;
     void process_timer(uint32_t events);
     std::function<void(uint32_t events)> timerHandler;
+    void update_events();
 };

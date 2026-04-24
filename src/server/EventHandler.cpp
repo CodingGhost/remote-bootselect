@@ -29,6 +29,17 @@ void EventHandler::register_socket(int socket, std::function<void(uint32_t)>& f,
     }
 }
 
+void EventHandler::modify_socket(int socket, std::function<void(uint32_t)>& f, uint32_t events) {
+    epoll_event event;
+    event.events = events;
+    event.data.ptr = &f;
+    int r = epoll_ctl(epfd, EPOLL_CTL_MOD, socket, &event);
+    if (r == -1) {
+        std::cout << "error: failed to modify socket in epoll: " << strerror(errno) << std::endl;
+        exit(errno);
+    }
+}
+
 void EventHandler::handle_events() {
     epoll_event event;
     while (true) {

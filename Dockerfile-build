@@ -1,5 +1,5 @@
 FROM debian:latest
-RUN apt update && apt install -y build-essential linux-headers-generic autoconf automake gettext git patch autopoint binutils bison flex m4 python3 pkg-config gawk
+RUN apt update && apt install -y build-essential linux-headers-generic autoconf automake gettext git patch autopoint binutils bison flex m4 python3 pkg-config gawk liblzma-dev libfreetype-dev libfreetype6 libfreetype6-dev   libharfbuzz-dev libglib2.0-dev libsysprof-capture-4-dev libsysprof-6-dev
 WORKDIR /app
 
 CMD ["bash"]

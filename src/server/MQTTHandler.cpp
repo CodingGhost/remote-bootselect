@@ -32,7 +32,7 @@ void state_callback(mosquitto* /*mqtt*/, void* obj, const mosquitto_message* msg
 
 MQTTHandler::MQTTHandler(EventHandler& eventHandler, ConfigHandler& configHandler, std::string const& host, uint16_t const& port,
                          std::string const& username, std::string const& password)
-    : configHandler(configHandler) {
+    : configHandler(configHandler), eventHandler(eventHandler) {
     mosquitto_lib_init();
     mqtt = mosquitto_new(NULL, true, this);
     mosquitto_username_pw_set(mqtt, username.c_str(), password.c_str());
@@ -54,9 +54,14 @@ MQTTHandler::MQTTHandler(EventHandler& eventHandler, ConfigHandler& configHandle
                 timerfd_settime(timer_fd, 0, &ts, nullptr);
 
                 handler = std::bind(&MQTTHandler::process_socket, this, std::placeholders::_1);
-                eventHandler.register_socket(timer_fd, timerHandler);
                 timerHandler = std::bind(&MQTTHandler::process_timer, this, std::placeholders::_1);
-                eventHandler.register_socket(mqtt_socket, handler, EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP);
+                eventHandler.register_socket(timer_fd, timerHandler);
+
+                uint32_t events = EPOLLIN | EPOLLERR | EPOLLHUP;
+                if (mosquitto_want_write(mqtt)) {
+                    events |= EPOLLOUT;
+                }
+                eventHandler.register_socket(mqtt_socket, handler, events);
 
                 mosquitto_message_callback_set(mqtt, message_callback);
             }
@@ -139,6 +144,7 @@ void MQTTHandler::upload_menuentries(MAC const& mac, std::unordered_map<std::str
 
     std::string payload_str = payload.dump();
     mosquitto_publish(mqtt, NULL, discovery_topic.c_str(), payload_str.size(), payload_str.c_str(), 0, true);
+    update_events();
 }
 
 void MQTTHandler::process_socket(uint32_t events) {
@@ -148,12 +154,14 @@ void MQTTHandler::process_socket(uint32_t events) {
     if (events & EPOLLOUT) {
         mosquitto_loop_write(mqtt, 1);
     }
+    update_events();
 }
 
 void MQTTHandler::process_timer(uint32_t /*events*/) {
     uint64_t exp;
     read(timer_fd, &exp, sizeof(exp));
     mosquitto_loop_misc(mqtt);
+    update_events();
 }
 
 void MQTTHandler::publish_state(MAC const& mac, std::string const& entry){
@@ -167,5 +175,19 @@ void MQTTHandler::publish_state(MAC const& mac, std::string const& entry){
     // TODO:
     // subscribe to this once on startup
     mosquitto_publish(mqtt, NULL, topic.c_str(), entry.size(), entry.c_str(), 0, true);
+    update_events();
+}
+
+void MQTTHandler::update_events() {
+    if (mqtt_socket == -1) {
+        return;
+    }
+
+    uint32_t events = EPOLLIN | EPOLLERR | EPOLLHUP;
+    if (mosquitto_want_write(mqtt)) {
+        events |= EPOLLOUT;
+    }
+
+    eventHandler.modify_socket(mqtt_socket, handler, events);
 }
 
